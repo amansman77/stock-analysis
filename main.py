@@ -78,21 +78,41 @@ def get_krx_code(market=None, force_update=False):
     
     # ETF 데이터 가져오기
     etf_code = None
+    response = None
     try:
         etf_params = {
             'bld': 'dbms/MDC/STAT/standard/MDCSTAT04301',
-            'mktId': 'ETF',
+            'locale': 'ko_KR',
+            'trdDd': datetime.now().strftime('%Y%m%d'),
             'share': '1',
+            'money': '1',
             'csvxls_isNo': 'false',
         }
+        print("\nETF API 요청 파라미터:", etf_params)
         response = requests.post(url, data=etf_params, headers=headers)
+        print(f"ETF API 응답 상태 코드: {response.status_code}")
+        
         etf_data = response.json()
-        if 'OutBlock_1' in etf_data:
-            etf_code = pd.DataFrame(etf_data['OutBlock_1'])
-            etf_code = etf_code.rename(columns={'ISU_SRT_CD': 'code', 'ISU_ABBRV': 'name'})
+        if 'output' in etf_data:  # 'OutBlock_1' 대신 'output' 사용
+            etf_code = pd.DataFrame(etf_data['output'])
+            print("ETF 데이터 컬럼:", etf_code.columns.tolist())
+            etf_code = etf_code.rename(columns={
+                'ISU_SRT_CD': 'code',     # 종목코드
+                'ISU_ABBRV': 'name',      # 종목명
+            })
             print(f"ETF 데이터 조회 성공: {len(etf_code)}개")
+        else:
+            print("ETF 데이터에 'output'이 없습니다.")
+            if 'message' in etf_data:
+                print("API 메시지:", etf_data['message'])
     except Exception as e:
         print(f"ETF 데이터 조회 실패: {str(e)}")
+        if response is not None:
+            debug_file = os.path.join(debug_dir, 'etf_api_error.txt')
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write(f"Status Code: {response.status_code}\n\n")
+                f.write(response.text[:10000])  # 처음 10000자만 저장
+            print(f"오류 응답이 {debug_file}에 저장되었습니다.")
     
     # 데이터 합치기
     if stock_code is not None and etf_code is not None:
