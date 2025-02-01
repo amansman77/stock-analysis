@@ -188,7 +188,9 @@ def get_stock_price(code, num_of_pages, sort_date = True):
         
         url = f"http://finance.naver.com/item/sise_day.nhn?code={code}"
         headers = {'User-agent': 'Mozilla/5.0'} 
-        bs = BeautifulSoup(requests.get(url=url, headers=headers).text, 'html.parser')
+        response = requests.get(url=url, headers=headers)
+        response.encoding = 'euc-kr'  # 네이버 금융은 EUC-KR 인코딩 사용
+        bs = BeautifulSoup(response.text, 'html.parser')
         pgrr = bs.find("td", class_="pgRR")
         last_page = int(pgrr.a["href"].split('=')[-1])
         
@@ -197,8 +199,9 @@ def get_stock_price(code, num_of_pages, sort_date = True):
 
         for page in range(1, pages+1):
             page_url = '{}&page={}'.format(url, page)
-            raw_data = pd.read_html(requests.get(page_url, headers={'User-agent': 'Mozilla/5.0'}).text)[0]
-            new_df = pd.concat([new_df, raw_data], ignore_index=True)
+            response = requests.get(page_url, headers={'User-agent': 'Mozilla/5.0'})
+            response.encoding = 'euc-kr'
+            new_df = pd.concat([new_df, pd.read_html(response.text, encoding='euc-kr')[0]], ignore_index=True)
         
         new_df = new_df.rename(columns={'날짜':'date','종가':'close','전일비':'diff'
                     ,'시가':'open','고가':'high','저가':'low','거래량':'volume'})
