@@ -24,11 +24,36 @@ def get_krx_code(market=None):
         market_type = '&marketType=konexMkt'
         
     url = 'http://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13{0}'.format(market_type)
-    stock_code = pd.read_html(url, header = 0)[0]
-    stock_code['종목코드'] = stock_code['종목코드'].map('{:06d}'.format)
+    headers = {'User-agent': 'Mozilla/5.0'}
+    response = requests.get(url, headers=headers)
+    response.encoding = 'euc-kr'
+    
+    try:
+        stock_code = pd.read_html(response.text, header=0, encoding='euc-kr')[0]
+    except Exception as e:
+        # KRX 사이트가 응답하지 않을 경우를 위한 대체 URL
+        url = 'http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd'
+        params = {
+            'mktId': 'ALL',
+            'trdDd': datetime.now().strftime('%Y%m%d'),
+            'share': '1',
+            'money': '1',
+            'csvxls_isNo': 'false',
+            'name': 'fileDown',
+            'url': 'dbms/MDC/STAT/standard/MDCSTAT01901'
+        }
+        headers = {'Referer': 'http://data.krx.co.kr/contents/MDC/MDI/mdiLoader'}
+        otp = requests.post(url, params=params, headers=headers).text
+        
+        down_url = 'http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd'
+        response = requests.post(down_url, params={'code': otp}, headers=headers)
+        response.encoding = 'euc-kr'
+        stock_code = pd.read_html(response.text, header=0, encoding='euc-kr')[0]
+    
+    stock_code['종목코드'] = stock_code['종목코드'].astype(str).str.zfill(6)
     stock_code = stock_code[['회사명', '종목코드', '업종', '상장일']]
-    stock_code = stock_code.rename(columns = {'회사명': 'name', '종목코드': 'code', '업종': 'sectors',
-                                              '상장일': 'listing_date'})
+    stock_code = stock_code.rename(columns={'회사명': 'name', '종목코드': 'code', '업종': 'sectors',
+                                          '상장일': 'listing_date'})
     stock_code['listing_date'] = pd.to_datetime(stock_code['listing_date'])
     
     return stock_code
