@@ -19,14 +19,15 @@
 - 주간 분석 결과 자동 전송
 - 매수/매도 시그널 발생 시 즉시 알림
 - 시스템 오류 발생 시 알림
+- 전체 분석 결과 요약 제공
 
 ## 4. 자동화 구성
 - 환경 변수를 통한 설정 관리 (.env 파일)
   - Discord Webhook URL
-  - 분석할 종목명
+  - 분석할 종목명 (쉼표로 구분하여 여러 종목 설정 가능)
   - 데이터 수집 기간
-- API 서버를 통한 외부 접근 가능
-- Cloudflare Workers를 통한 주간 자동 실행
+- GitHub Actions를 통한 주간 자동 실행 (매주 토요일 오전 9시)
+- 분석 결과 및 데이터 자동 저장
 
 ## 설치 및 실행
 
@@ -39,7 +40,7 @@ pip install -r requirements.txt
 - `.env` 파일에 다음 내용 설정
 ```
 DISCORD_WEBHOOK_URL=your_webhook_url_here
-STOCK_NAME=분석할_종목명
+STOCK_NAME=종목1,종목2,종목3
 DATA_DAYS=200
 ```
 
@@ -47,6 +48,14 @@ DATA_DAYS=200
 ```bash
 python main.py
 ```
+
+## GitHub Actions 설정
+
+이 프로젝트는 GitHub Actions를 통해 자동으로 실행됩니다:
+- 매주 토요일 오전 9시(KST)에 자동 실행
+- 수동 실행도 가능 (GitHub Actions 탭에서 "Run workflow" 버튼 사용)
+- 분석 결과는 Discord로 자동 전송
+- 데이터는 저장소에 자동으로 커밋됨
 
 ## 향후 계획
 

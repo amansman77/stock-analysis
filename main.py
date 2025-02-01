@@ -5,14 +5,29 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
+# 현재 스크립트의 디렉토리에서 .env 파일 찾기
+env_path = Path(__file__).resolve().parent / '.env'
+print(f"Looking for .env file at: {env_path}")
+
+if not env_path.exists():
+    print(f"Warning: .env file not found at {env_path}")
+else:
+    print(f".env file found and exists")
+    
 # .env 파일 로드
-load_dotenv()
+load_dotenv(dotenv_path=env_path)
+
+# 환경변수 가져오기 전에 현재 환경변수 상태 출력
+print("\nCurrent environment variables:")
+for key in ['DISCORD_WEBHOOK_URL', 'STOCK_NAME', 'DATA_DAYS']:
+    print(f"{key} raw value: '{os.getenv(key)}'")
 
 # 환경변수 가져오기
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
-STOCK_NAME = os.getenv('STOCK_NAME', '티웨이홀딩스')  # 기본값 설정
-DATA_DAYS = int(os.getenv('DATA_DAYS', '200'))  # 기본값 설정
+STOCK_NAMES = [name.strip() for name in os.getenv('STOCK_NAME', '티웨이홀딩스').split(',')]
+DATA_DAYS = int(os.getenv('DATA_DAYS', '200').strip())  # 기본값 설정
 
 def get_krx_code(market=None):
     market_type = ''
@@ -432,50 +447,71 @@ def format_discord_message(item_name, stock, signals, weekly_df):
     
     return message
 
-def analyze_stock(item_name=None, webhook_url=None):
-    """주식 분석 및 Discord 알림 전송"""
-    if item_name is None:
-        item_name = '티웨이홀딩스'
+def analyze_stocks():
+    """여러 주식 분석 및 Discord 알림 전송"""
+    all_results = []
+    error_stocks = []
     
-    try:
-        stock = get_krx_code().query("name=='{}'".format(item_name))['code'].to_string(index=False)
-        df = get_stock_price(stock, 200)
-        weekly_df = get_weekly_data(df, stock)
-        
-        if weekly_df is not None:
-            signals = check_macd_signals(weekly_df)
+    for item_name in STOCK_NAMES:
+        try:
+            print(f"\n=== {item_name} 분석 시작 ===")
+            stock = get_krx_code().query("name==@item_name")['code'].iloc[0]
+            df = get_stock_price(stock, DATA_DAYS)
+            weekly_df = get_weekly_data(df, stock)
             
-            # 콘솔 출력
-            print(f"\n=== {item_name}({stock}) 주간 MACD 분석 결과 ===")
-            print("\n주간          종가      전주비    거래량     MACD히스토그램")
-            print("-" * 65)
+            if weekly_df is not None:
+                signals = check_macd_signals(weekly_df)
+                
+                # 콘솔 출력
+                print(f"\n=== {item_name}({stock}) 주간 MACD 분석 결과 ===")
+                print("\n주간          종가      전주비    거래량     MACD히스토그램")
+                print("-" * 65)
 
-            for _, row in weekly_df.iterrows():
-                print(f"{row['date'].strftime('%Y-%m-%d')}  "
-                      f"{row['close']:8,}  "
-                      f"{row['diff']:+8,}  "
-                      f"{row['volume']:10,}  "
-                      f"{row['macd_hist']:+8.2f}")
-            
-            # Discord 알림 전송
-            if webhook_url:
-                message = format_discord_message(item_name, stock, signals, weekly_df)
-                send_to_discord(message, webhook_url)
-            
-            return {
-                'success': True,
-                'message': '분석 완료',
-                'signals': signals is not None and len(signals) > 0
-            }
-            
-    except Exception as e:
-        error_message = f"분석 중 오류 발생: {str(e)}"
-        if webhook_url:
-            send_to_discord(f"⚠️ **오류 발생**\n{error_message}", webhook_url)
-        return {
-            'success': False,
-            'message': error_message
-        }
+                for _, row in weekly_df.iterrows():
+                    print(f"{row['date'].strftime('%Y-%m-%d')}  "
+                          f"{row['close']:8,}  "
+                          f"{row['diff']:+8,}  "
+                          f"{row['volume']:10,}  "
+                          f"{row['macd_hist']:+8.2f}")
+                
+                # Discord 알림 전송
+                if DISCORD_WEBHOOK_URL:
+                    message = format_discord_message(item_name, stock, signals, weekly_df)
+                    send_to_discord(message, DISCORD_WEBHOOK_URL)
+                
+                all_results.append({
+                    'name': item_name,
+                    'code': stock,
+                    'signals': signals is not None and len(signals) > 0
+                })
+                
+        except Exception as e:
+            error_message = f"{item_name} 분석 중 오류 발생: {str(e)}"
+            print(error_message)
+            error_stocks.append(item_name)
+            if DISCORD_WEBHOOK_URL:
+                send_to_discord(f"⚠️ **오류 발생**\n{error_message}", DISCORD_WEBHOOK_URL)
+    
+    # 전체 분석 결과 요약
+    if DISCORD_WEBHOOK_URL and all_results:
+        summary = "📊 **전체 분석 결과 요약**\n\n"
+        summary += f"✅ 분석 완료: {len(all_results)}개 종목\n"
+        if error_stocks:
+            summary += f"❌ 분석 실패: {len(error_stocks)}개 종목 ({', '.join(error_stocks)})\n"
+        
+        signals_found = [result['name'] for result in all_results if result['signals']]
+        if signals_found:
+            summary += f"\n🔔 매매 시그널 발생 종목: {', '.join(signals_found)}"
+        else:
+            summary += "\n💡 매매 시그널이 발생한 종목이 없습니다."
+        
+        send_to_discord(summary, DISCORD_WEBHOOK_URL)
+    
+    return {
+        'success': True,
+        'analyzed': len(all_results),
+        'errors': len(error_stocks)
+    }
 
 # CLI 실행용 메인 함수
 def main():
@@ -484,8 +520,10 @@ def main():
     else:
         print("Warning: DISCORD_WEBHOOK_URL이 설정되지 않아 Discord 알림이 비활성화됩니다.")
     
+    print(f"분석할 종목: {', '.join(STOCK_NAMES)}")
+    
     # 분석 실행
-    analyze_stock(item_name=STOCK_NAME, webhook_url=DISCORD_WEBHOOK_URL)
+    analyze_stocks()
 
 if __name__ == "__main__":
     main()
