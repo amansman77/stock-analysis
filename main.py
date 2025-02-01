@@ -29,49 +29,92 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 STOCK_NAMES = [name.strip() for name in os.getenv('STOCK_NAME', '티웨이홀딩스').split(',')]
 DATA_DAYS = int(os.getenv('DATA_DAYS', '200').strip())  # 기본값 설정
 
-def get_krx_code(market=None):
-    market_type = ''
-    if market == 'kospi':
-        market_type = '&marketType=stockMkt'
-    elif market == 'kosdaq':
-        market_type = '&marketType=kosdaqMkt'
-    elif market == 'konex':
-        market_type = '&marketType=konexMkt'
-        
-    url = 'http://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13{0}'.format(market_type)
-    headers = {'User-agent': 'Mozilla/5.0'}
-    response = requests.get(url, headers=headers)
-    response.encoding = 'euc-kr'
+def get_krx_code(market=None, force_update=False):
+    """
+    주식 종목 코드 조회 (ETF 포함)
+    force_update: True일 경우 캐시된 파일을 무시하고 새로 데이터를 가져옴
+    """
+    # 캐시 파일 경로
+    cache_dir = 'stock_data'
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    cache_file = os.path.join(cache_dir, 'krx_code.csv')
     
+    # 오늘 날짜
+    today = datetime.now().date()
+    
+    # 캐시된 파일이 있고 오늘 생성된 것이면 그것을 사용
+    if not force_update and os.path.exists(cache_file):
+        file_mtime = datetime.fromtimestamp(os.path.getmtime(cache_file)).date()
+        if file_mtime == today:
+            print(f"캐시된 종목 코드 데이터 사용 (생성일: {file_mtime})")
+            return pd.read_csv(cache_file)
+    
+    print("KRX에서 종목 코드 데이터 새로 가져오기...")
+    
+    # 일반 주식 데이터 가져오기
+    stock_code = None
     try:
-        stock_code = pd.read_html(response.text, header=0, encoding='euc-kr')[0]
-    except Exception as e:
-        # KRX 사이트가 응답하지 않을 경우를 위한 대체 URL
-        url = 'http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd'
-        params = {
+        url = 'http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd'
+        stock_params = {
+            'bld': 'dbms/MDC/STAT/standard/MDCSTAT01901',
             'mktId': 'ALL',
-            'trdDd': datetime.now().strftime('%Y%m%d'),
             'share': '1',
-            'money': '1',
             'csvxls_isNo': 'false',
-            'name': 'fileDown',
-            'url': 'dbms/MDC/STAT/standard/MDCSTAT01901'
         }
-        headers = {'Referer': 'http://data.krx.co.kr/contents/MDC/MDI/mdiLoader'}
-        otp = requests.post(url, params=params, headers=headers).text
-        
-        down_url = 'http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd'
-        response = requests.post(down_url, params={'code': otp}, headers=headers)
-        response.encoding = 'euc-kr'
-        stock_code = pd.read_html(response.text, header=0, encoding='euc-kr')[0]
+        headers = {
+            'Referer': 'http://data.krx.co.kr/contents/MDC/MDI/mdiLoader',
+            'User-Agent': 'Mozilla/5.0',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+        response = requests.post(url, data=stock_params, headers=headers)
+        stock_data = response.json()
+        if 'OutBlock_1' in stock_data:
+            stock_code = pd.DataFrame(stock_data['OutBlock_1'])
+            stock_code = stock_code.rename(columns={'ISU_SRT_CD': 'code', 'ISU_ABBRV': 'name'})
+            print(f"일반 주식 데이터 조회 성공: {len(stock_code)}개")
+    except Exception as e:
+        print(f"일반 주식 데이터 조회 실패: {str(e)}")
     
-    stock_code['종목코드'] = stock_code['종목코드'].astype(str).str.zfill(6)
-    stock_code = stock_code[['회사명', '종목코드', '업종', '상장일']]
-    stock_code = stock_code.rename(columns={'회사명': 'name', '종목코드': 'code', '업종': 'sectors',
-                                          '상장일': 'listing_date'})
-    stock_code['listing_date'] = pd.to_datetime(stock_code['listing_date'])
+    # ETF 데이터 가져오기
+    etf_code = None
+    try:
+        etf_params = {
+            'bld': 'dbms/MDC/STAT/standard/MDCSTAT04301',
+            'mktId': 'ETF',
+            'share': '1',
+            'csvxls_isNo': 'false',
+        }
+        response = requests.post(url, data=etf_params, headers=headers)
+        etf_data = response.json()
+        if 'OutBlock_1' in etf_data:
+            etf_code = pd.DataFrame(etf_data['OutBlock_1'])
+            etf_code = etf_code.rename(columns={'ISU_SRT_CD': 'code', 'ISU_ABBRV': 'name'})
+            print(f"ETF 데이터 조회 성공: {len(etf_code)}개")
+    except Exception as e:
+        print(f"ETF 데이터 조회 실패: {str(e)}")
     
-    return stock_code
+    # 데이터 합치기
+    if stock_code is not None and etf_code is not None:
+        code_df = pd.concat([stock_code[['name', 'code']], etf_code[['name', 'code']]], ignore_index=True)
+    elif stock_code is not None:
+        code_df = stock_code[['name', 'code']]
+    elif etf_code is not None:
+        code_df = etf_code[['name', 'code']]
+    else:
+        raise Exception("주식 및 ETF 데이터를 모두 가져오는데 실패했습니다.")
+    
+    # 종목코드 형식 통일
+    code_df['code'] = code_df['code'].astype(str).str.zfill(6)
+    
+    # 중복 제거
+    code_df = code_df.drop_duplicates(subset=['code'], keep='first')
+    
+    # 캐시 파일로 저장
+    code_df.to_csv(cache_file, index=False)
+    print(f"전체 {len(code_df)}개 종목 데이터 저장 완료: {cache_file}")
+    
+    return code_df
 
 def is_trading_day(date):
     """
