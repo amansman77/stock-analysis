@@ -518,6 +518,15 @@ def analyze_stocks():
     error_stocks = []
     signals_found = []
     
+    # 분석 시작 알림
+    if DISCORD_WEBHOOK_URL:
+        start_message = "🔄 **주식 분석 시작**\n\n"
+        start_message += f"📈 분석 대상 종목 ({len(STOCK_NAMES)}개):\n"
+        for idx, name in enumerate(STOCK_NAMES, 1):
+            start_message += f"{idx}. {name}\n"
+        start_message += f"\n⏰ 시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        send_to_discord(start_message, DISCORD_WEBHOOK_URL)
+    
     for item_name in STOCK_NAMES:
         try:
             print(f"\n=== {item_name} 분석 시작 ===")
