@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+from io import StringIO
 
 # 현재 스크립트의 디렉토리에서 .env 파일 찾기
 env_path = Path(__file__).resolve().parent / '.env'
@@ -304,7 +305,8 @@ def get_stock_price(code, num_of_pages, sort_date = True):
             page_url = '{}&page={}'.format(url, page)
             response = requests.get(page_url, headers={'User-agent': 'Mozilla/5.0'})
             response.encoding = 'euc-kr'
-            new_df = pd.concat([new_df, pd.read_html(response.text, encoding='euc-kr')[0]], ignore_index=True)
+            html_content = StringIO(response.text)
+            new_df = pd.concat([new_df, pd.read_html(html_content, encoding='euc-kr')[0]], ignore_index=True)
         
         new_df = new_df.rename(columns={'날짜':'date','종가':'close','전일비':'diff'
                     ,'시가':'open','고가':'high','저가':'low','거래량':'volume'})
