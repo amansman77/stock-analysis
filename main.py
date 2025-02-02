@@ -516,6 +516,7 @@ def analyze_stocks():
     """여러 주식 분석 및 Discord 알림 전송"""
     all_results = []
     error_stocks = []
+    signals_found = []
     
     for item_name in STOCK_NAMES:
         try:
@@ -539,10 +540,11 @@ def analyze_stocks():
                           f"{row['volume']:10,}  "
                           f"{row['macd_hist']:+8.2f}")
                 
-                # Discord 알림 전송
-                if DISCORD_WEBHOOK_URL:
+                # Discord 알림 전송 (매매 시그널이 있는 경우에만)
+                if DISCORD_WEBHOOK_URL and signals:
                     message = format_discord_message(item_name, stock, signals, weekly_df)
                     send_to_discord(message, DISCORD_WEBHOOK_URL)
+                    signals_found.append(item_name)
                 
                 all_results.append({
                     'name': item_name,
@@ -564,18 +566,22 @@ def analyze_stocks():
         if error_stocks:
             summary += f"❌ 분석 실패: {len(error_stocks)}개 종목 ({', '.join(error_stocks)})\n"
         
-        signals_found = [result['name'] for result in all_results if result['signals']]
         if signals_found:
             summary += f"\n🔔 매매 시그널 발생 종목: {', '.join(signals_found)}"
         else:
             summary += "\n💡 매매 시그널이 발생한 종목이 없습니다."
+        
+        # 분석 시간 추가
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        summary += f"\n\n⏰ 분석 시간: {current_time}"
         
         send_to_discord(summary, DISCORD_WEBHOOK_URL)
     
     return {
         'success': True,
         'analyzed': len(all_results),
-        'errors': len(error_stocks)
+        'errors': len(error_stocks),
+        'signals': len(signals_found)
     }
 
 # CLI 실행용 메인 함수
