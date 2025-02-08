@@ -283,30 +283,43 @@ def get_stock_price(code, num_of_pages, sort_date = True):
     # 오늘 날짜
     today = pd.Timestamp.now().normalize()
     
+    # 데이터 업데이트가 필요한지 확인
+    need_update = False
+    
+    if not os.path.exists(file_path):
+        need_update = True
+        pages_to_fetch = num_of_pages  # 전체 데이터 가져오기
+    else:
+        # 최신 데이터 날짜와 오늘 사이의 거래일 수 계산
+        date_range = pd.date_range(start=latest_date + pd.Timedelta(days=1), end=today)
+        trading_days = [d for d in date_range if is_trading_day(d)]
+        if trading_days:  # 거래일이 하나라도 있으면 업데이트 필요
+            need_update = True
+            # 최근 2주치 데이터만 가져오기 (안전을 위해)
+            pages_to_fetch = 2
+    
     # 새로운 데이터를 저장할 데이터프레임
     df = pd.DataFrame()
     
-    # 데이터 업데이트가 필요한 경우: 파일이 없거나, 최신 데이터가 오래된 경우
-    if not os.path.exists(file_path) or (latest_date < today and is_trading_day(today)):
+    # 데이터 업데이트가 필요한 경우
+    if need_update:
         print(f"데이터 업데이트 중: {code}")
+        print(f"최근 데이터 날짜: {latest_date.strftime('%Y-%m-%d')}")
+        print(f"현재 날짜: {today.strftime('%Y-%m-%d')}")
         
         url = f"http://finance.naver.com/item/sise_day.nhn?code={code}"
         headers = {'User-agent': 'Mozilla/5.0'} 
-        response = requests.get(url=url, headers=headers)
-        response.encoding = 'euc-kr'  # 네이버 금융은 EUC-KR 인코딩 사용
-        bs = BeautifulSoup(response.text, 'html.parser')
-        pgrr = bs.find("td", class_="pgRR")
-        last_page = int(pgrr.a["href"].split('=')[-1])
         
-        pages = min(last_page, num_of_pages)
         new_df = pd.DataFrame()
-
-        for page in range(1, pages+1):
+        
+        # 최소한의 페이지만 가져오기
+        for page in range(1, pages_to_fetch + 1):
             page_url = '{}&page={}'.format(url, page)
             response = requests.get(page_url, headers={'User-agent': 'Mozilla/5.0'})
             response.encoding = 'euc-kr'
             html_content = StringIO(response.text)
-            new_df = pd.concat([new_df, pd.read_html(html_content, encoding='euc-kr')[0]], ignore_index=True)
+            temp_df = pd.read_html(html_content, encoding='euc-kr')[0]
+            new_df = pd.concat([new_df, temp_df], ignore_index=True)
         
         new_df = new_df.rename(columns={'날짜':'date','종가':'close','전일비':'diff'
                     ,'시가':'open','고가':'high','저가':'low','거래량':'volume'})
@@ -333,6 +346,10 @@ def get_stock_price(code, num_of_pages, sort_date = True):
         if existing_df.empty:
             df = new_df
         else:
+            # 새로운 데이터에서 기존 데이터의 날짜 이후 데이터만 선택
+            new_df = new_df[new_df['date'] > latest_date]
+            print(f"새로운 데이터 수: {len(new_df)} 행")
+            
             # 중복 제거하면서 데이터 병합
             df = pd.concat([existing_df, new_df])
             df = df.drop_duplicates(subset=['date'], keep='last')
@@ -348,8 +365,11 @@ def get_stock_price(code, num_of_pages, sort_date = True):
         save_columns = ['date', 'open', 'high', 'low', 'close', 'diff', 'volume', 
                        'ema12', 'ema26', 'macd_line', 'signal_line', 'macd_hist']
         df[save_columns].to_csv(file_path, index=False)
+        
+        print(f"데이터 업데이트 완료: {len(df)} 행")
     else:
         df = existing_df
+        print(f"기존 데이터 사용: {len(df)} 행")
     
     # 최근 30주 데이터 필터링
     thirty_weeks_ago = datetime.now() - timedelta(weeks=30)
