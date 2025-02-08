@@ -2,8 +2,8 @@ name: Weekly Stock Analysis
 
 on:
   schedule:
-    # 매주 토요일 오전 9시 (UTC+9 기준으로는 토요일 오전 9시)
-    - cron: '0 0 * * 6'
+    # 매주 토요일 오전 9시 실행을 위해 8시 45분에 스케줄링 (GitHub Actions의 지연 시간 고려)
+    - cron: '45 23 * * 5'  # UTC 기준 금요일 23:45 (한국 시간 토요일 08:45)
   workflow_dispatch:  # 수동 실행 가능
 
 permissions:
